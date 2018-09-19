@@ -2,6 +2,7 @@ var express = require('express');
 var app = express();
 var bodyParser = require('body-parser');
 var mongoose = require('mongoose');
+var jwt    = require('jsonwebtoken');
 
 app.use(bodyParser.json());
 
@@ -14,6 +15,10 @@ app.use(function (req, res, next) {
 });
 
 Ticket = require('./models/ticket');
+User = require('./models/user');
+var config = require('./config');
+
+app.set('superSecret', config.secret); 
 
 mongoose.connect('mongodb://localhost/parkingapi');
 var db = mongoose.connection;
@@ -21,6 +26,60 @@ var db = mongoose.connection;
 app.get('/', function(req, res){
     res.send('Welcome to the Parking API!');
 });var express = require('express');
+
+//Authentication
+app.post('/authenticate', function(req, res){
+    User.findOne({
+        name: req.body.name
+    }, function(err, user) {
+
+        if (err) throw err;
+
+        if (!user) {
+        res.json({ success: false, message: 'Authentication failed. User not found.' });
+        } else if (user) {
+
+        if (user.password != req.body.password) {
+            res.json({ success: false, message: 'Authentication failed. Wrong password.' });
+        } else {
+
+        const payload = {
+            admin: user.admin 
+        };
+
+        var token = jwt.sign(payload, app.get('superSecret'));
+
+        res.json({
+            success: true,
+            token: token
+        });
+        }   
+
+        }
+
+    });
+});
+
+//Middleware function
+
+function JWTCheckMiddleware(req, res, next) {
+    var token = req.body.token || req.query.token || req.headers['x-access-token'];
+    if (token) {
+      jwt.verify(token, app.get('superSecret'), function(err, decoded) {
+        if (err) {
+          return res.json({ success: false, message: 'Failed to authenticate token.' });
+        } else {
+          req.decoded = decoded;
+          next();
+        }
+      });
+    } else {
+      return res.status(403).send({
+        success: false,
+        message: 'No token provided.'
+      });
+    }
+};
 
 //Get all tickets
 
@@ -57,7 +116,7 @@ app.get('/tickets/reg/:vehRegistration', function(req, res){
 
 //Add ticket
 
-app.post('/tickets', function(req, res){
+app.post('/tickets', JWTCheckMiddleware, function(req, res){
     var ticket = req.body;
     Ticket.addTicket(ticket, function(err, ticket){
         if(err){
@@ -69,7 +128,7 @@ app.post('/tickets', function(req, res){
 
 //Update ticket
 
-app.put('/tickets/:_id', function(req, res){
+app.put('/tickets/:_id', JWTCheckMiddleware, function(req, res){
     var id = req.params._id;
     var ticket = req.body;
     Ticket.updateTicket(id, ticket, {}, function(err, ticket){
@@ -82,7 +141,7 @@ app.put('/tickets/:_id', function(req, res){
 
 //Delete ticket
 
-app.delete('/tickets/:_id', function(req, res){
+app.delete('/tickets/:_id', JWTCheckMiddleware, function(req, res){
     var id = req.params._id;
     Ticket.deleteTicket(id, function(err, ticket){
         if(err){
